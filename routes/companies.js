@@ -4,6 +4,7 @@ const express = require('express');
 const router = new express.Router();
 const db = require('../db'); // db client connection
 const ExpressError = require('../expressError');
+const slugify = require('slugify');
 
 // Get a list of companies
 router.get('/', async (req, resp, next) => {
@@ -24,17 +25,32 @@ router.get('/:code', async (req, resp, next) => {
             `SELECT code, name, description
             FROM companies
             WHERE code=$1`, [code]);
+        console.log("Company Query Results:", companyResults.rows);
 
         if (companyResults.rows.length === 0) {
             throw new ExpressError(`Company with code ${code} not found`, 404);
         }
 
+        // fetch industries associated with the company
+        const industryResults = await db.query(
+            `SELECT i.industry
+            FROM industries AS i
+            JOIN companies_industries AS ci
+            ON i.code = ci.industry_code
+            WHERE ci.company_code = $1`, [code]
+        )
+        console.log("Industry Query Results:", industryResults.rows);
+
+        // fetch invoices associated with the company
         const invoiceResults = await db.query(
             `SELECT id
             FROM invoices
             WHERE comp_code=$1`, [code]);
 
+        console.log("Invoice Query Results:", invoiceResults.rows);
+
         const company = companyResults.rows[0];
+        const industries = industryResults.rows.map(ind => ind.industry)
         const invoices = invoiceResults.rows.map(invoice => invoice.id);
 
         // return company info along with invoice ids
@@ -43,7 +59,8 @@ router.get('/:code', async (req, resp, next) => {
                 code: company.code,
                 name: company.name,
                 description: company.description,
-                invoices: invoices
+                invoices: invoices,
+                industries: industries
             }
         })
 
@@ -55,7 +72,8 @@ router.get('/:code', async (req, resp, next) => {
 // Add a new company
 router.post('/', async (req, resp, next) => {
     try {
-        const { code, name, description } = req.body;
+        const { name, description } = req.body;
+        const code = slugify(name, { lower: true, strict: true }); // use slugify for new company code
         const results = await db.query(`INSERT INTO companies (code, name, description)
             VALUES ($1, $2, $3)
             RETURNING code, name, description`, [code, name, description]);
